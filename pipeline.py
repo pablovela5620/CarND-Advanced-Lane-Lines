@@ -1,255 +1,246 @@
-import numpy as np
-import cv2
+import os
+import time
 import glob
-import matplotlib.pyplot as plt
+import numpy as np
 import matplotlib.image as mpimg
-import matplotlib.gridspec as gs
-from moviepy.editor import VideoFileClip
-from IPython.display import HTML
-from helper_function import undistort, perspective_transform, final_mask
-
-# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-objp = np.zeros((6 * 9, 3), np.float32)
-objp[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
-
-# Arrays to store object points and image points from all the images.
-objpoints = []  # 3d points in real world space
-imgpoints = []  # 2d points in image plane.
-
-# Make a list of calibration images
-images = glob.glob('camera_cal/calibration*.jpg')
-drawn_images = []
-
-# Step through the list and search for chessboard corners
-for fname in images:
-    img = mpimg.imread(fname)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Find the chessboard corners
-    ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
-
-    # If found, add object points, image points
-    if ret == True:
-        objpoints.append(objp)
-        imgpoints.append(corners)
-
-        # Draw and display the corners
-        img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
-        drawn_images.append(img)
+import matplotlib.pyplot as plt
+import cv2
+from helper_function import get_calibration, undistort_image, image_comparison, perspective_transform, final_mask, \
+    first_frame_detection, draw_lane, following_frames, get_video_frames, diagnostic
 
 
-def sliding_window(binary_warped):
+def lanefinding_pipeline(image):
+    # Global Variables to store fit polynomials and found masks
+    global frame
+    global previous_left_fit
+    global previous_right_fit
+    global left_mask
+    global right_mask
+    global diagnostic_screen
+
+    # Undistort image
+    undist = undistort_image(image, mtx, dist)
+
+    # Get perspective transform and inverse matrix
+    Minv, persp = perspective_transform(undist, src, dst)
+
+    # Color and sobel thresholding
+    binary_warped = final_mask(persp)
     out_img = np.dstack((binary_warped,  # Create an output image to draw on and visualize result
                          binary_warped,
                          binary_warped)) * 255
-    #Take a histogram of the bottom half of the image
-    histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
-    # These will be the starting point for the left and right lines
-    midpoint = np.int(histogram.shape[0] / 2)
-    leftx_base = np.argmax(histogram[:midpoint])
-    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
 
-    # Choose the number of sliding windows
-    nwindows = 9
-    # Set height of windows
-    window_height = np.int(binary_warped.shape[0] / nwindows)
-    # Identify the x and y positions of all nonzero pixels in the image
-    nonzero = binary_warped.nonzero()
-    nonzeroy = np.array(nonzero[0])
-    nonzerox = np.array(nonzero[1])
-    # Current positions to be updated for each window
-    leftx_current = leftx_base
-    rightx_current = rightx_base
-    # Set the width of the windows +/- margin
-    margin = 100
-    # Set minimum number of pixels found to recenter window
-    minpix = 50
-    # Create empty lists to receive left and right lane pixel indices
-    left_lane_inds = []
-    right_lane_inds = []
+    # Initial lane finding using computer vision techniques on the first frame
+    if frame == 0:
+        left_mask, right_mask = first_frame_detection(binary_warped)
 
-    # Step through the windows one by one
-    for window in range(nwindows):
-        # Identify window boundaries in x and y (and right and left)
-        win_y_low = binary_warped.shape[0] - (window + 1) * window_height
-        win_y_high = binary_warped.shape[0] - window * window_height
-        win_xleft_low = leftx_current - margin
-        win_xleft_high = leftx_current + margin
-        win_xright_low = rightx_current - margin
-        win_xright_high = rightx_current + margin
-        # Draw the windows on the visualization image
-        cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
-        cv2.rectangle(out_img, (win_xright_low, win_y_low), (win_xright_high, win_y_high), (0, 255, 0), 2)
-        # Identify the nonzero pixels in x and y within the window
-        good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xleft_low) & (
-            nonzerox < win_xleft_high)).nonzero()[0]
-        good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xright_low) & (
-            nonzerox < win_xright_high)).nonzero()[0]
-        # Append these indices to the lists
-        left_lane_inds.append(good_left_inds)
-        right_lane_inds.append(good_right_inds)
-        # If you found > minpix pixels, recenter next window on their mean position
-        if len(good_left_inds) > minpix:
-            leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
-        if len(good_right_inds) > minpix:
-            rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
+    # Right lane polynomial fit
+    right_lane = cv2.bitwise_and(binary_warped, right_mask)
+    # All nonzero pixels found in image where both mask and binary warped are nonzero
+    right_nonzero = right_lane.nonzero()
 
-    # Concatenate the arrays of indices
-    left_lane_inds = np.concatenate(left_lane_inds)
-    right_lane_inds = np.concatenate(right_lane_inds)
-
-    # Extract left and right line pixel positions
-    leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds]
-    rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds]
-
-    # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
-
-    ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-    left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-    right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
-
-    # Define y-value where we want radius of curvature
-    # I'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty)
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-
-    # Define conversions in x and y from pixels space to meters
-    ym_per_pix = 30 / 720  # meters per pixel in y dimension
-    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-
-    # Fit new polynomials to x,y in world space
-    left_fit_cr = np.polyfit(lefty * ym_per_pix, leftx * xm_per_pix, 2)
-    right_fit_cr = np.polyfit(righty * ym_per_pix, rightx * xm_per_pix, 2)
-    # Calculate the new radii of curvature
-    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-        2 * left_fit_cr[0])
-    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-        2 * right_fit_cr[0])
-
-    return left_fitx, right_fitx, ploty, left_curverad, right_curverad
-
-
-def draw_lane(image, binary_warped, Minv, left_fitx, right_fitx, ploty, left_curverad, right_curverad):
-    # Define conversions in x and y from pixels space to meters
-    ym_per_pix = 30 / 720  # meters per pixel in y dimension
-    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-
-    #Find the center of the lane
-    midpoint = np.int(image.shape[1] / 2)
-    middle_of_lane = (right_fitx[-1] - left_fitx[-1]) / 2.0 + left_fitx[-1]
-    offset = (midpoint - middle_of_lane) * xm_per_pix
-
-    # Create an image to draw the lines on
-    warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
-    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-
-    # Recast the x and y points into usable format for cv2.fillPoly()
-    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-    pts = np.hstack((pts_left, pts_right))
-
-    # Draw the lane onto the warped blank image
-    cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-
-    # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(color_warp, Minv, (image.shape[1], image.shape[0]))
-    # Combine the result with the original image
-    result = cv2.addWeighted(image, 1, newwarp, 0.3, 0)
-    cv2.putText(result, "Left Lane Radius: " + "{:0.2f}".format(left_curverad / 1000) + 'km', org=(50, 50),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=1, color=(0, 0, 0), lineType=cv2.LINE_AA, thickness=2)
-    cv2.putText(result, "Right Lane Radius: " + "{:0.2f}".format(right_curverad / 1000) + 'km', org=(50, 100),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=1, color=(0, 0, 0), lineType=cv2.LINE_AA, thickness=2)
-    cv2.putText(result, "Lane Center: " + "{:0.2f}".format(offset) + 'm', org=(50, 150),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=1, color=(0, 0, 0), lineType=cv2.LINE_AA, thickness=2)
-    return result
-
-
-def pipeline(image, video=True):
-    if video == False:
-        # Load Image
-        image = mpimg.imread(image)
-
-        # Undistort Image
-        undist = undistort(image, objpoints, imgpoints)
-
-        # Perspective Transform
-        Minv, birds_view = perspective_transform(undist)
-
-        # Masking
-        binary_warped = final_mask(birds_view)
-
-        # Find corresponding lane pixels
-        left_fitx, right_fitx, ploty, left_curverad, right_curverad = sliding_window(binary_warped)
-
-        # Draw lane lines onto image
-        drawn_lines = draw_lane(image, binary_warped, Minv, left_fitx, right_fitx, ploty, left_curverad, right_curverad)
-        return drawn_lines
-
-
-
-
+    # Ensures that the first frame has a polynomial fit
+    if frame == 0:
+        rightx = np.array(right_nonzero[0])
+        righty = np.array(right_nonzero[1])
+        right_fit = np.polyfit(rightx, righty, 2)
+    # Rejects found polynomial if there are less then 5000 pixels and uses previously found
+    elif len(right_nonzero[0]) < 5000:
+        right_fit = previous_right_fit
     else:
-        # Undistort Image
-        undist = undistort(image, objpoints, imgpoints)
+        rightx = np.array(right_nonzero[0])
+        righty = np.array(right_nonzero[1])
+        right_fit = np.polyfit(rightx, righty, 2)
 
-        # Perspective Transform
-        Minv, birds_view = perspective_transform(undist)
+    # Left lane polynomial fit
+    left_lane = cv2.bitwise_and(binary_warped, left_mask)
+    # All nonzero pixels found in image where both mask and binary warped are nonzero
+    left_nonzero = left_lane.nonzero()
 
-        # Masking
-        binary_warped = final_mask(birds_view)
+    # Ensures that the first frame has a polynomial fit
+    if frame == 0:
+        leftx = np.array(left_nonzero[0])
+        lefty = np.array(left_nonzero[1])
+        left_fit = np.polyfit(leftx, lefty, 2)
+    # Rejects found polynomial if there are less then 5000 pixels and uses previously found
+    elif len(left_nonzero[0]) < 2000:
+        left_fit = previous_left_fit
+    else:
+        leftx = np.array(left_nonzero[0])
+        lefty = np.array(left_nonzero[1])
+        left_fit = np.polyfit(leftx, lefty, 2)
 
-        # Find corresponding lane pixels
-        left_fitx, right_fitx, ploty, left_curverad, right_curverad = sliding_window(binary_warped)
+    # If first frame of video, increase frame  and saves found polynomial fit
+    if frame == 0:
+        frame = frame + 1
+        previous_left_fit = left_fit
+        previous_right_fit = right_fit
+    else:
+        frame = frame + 1
 
-        # Draw lane lines onto image
-        drawn_lines = draw_lane(image, binary_warped, Minv, left_fitx, right_fitx, ploty, left_curverad, right_curverad)
-        return drawn_lines
+    result, non_persp_warp = draw_lane(image, binary_warped, Minv, left_fit, right_fit, frame)
 
+    # Computing the masks after the first frame to significantly reduce computation time using the first found polynomial fit and basing mask from this
+    left_mask = following_frames(binary_warped, left_fit)
+    right_mask = following_frames(binary_warped, right_fit)
 
-def show_test_imgs(images):
-    plt.figure(figsize=(15, 10))
-    gs1 = gs.GridSpec(nrows=3, ncols=3)
+    # Saving polynomial fits for left and right lanes
+    previous_left_fit = left_fit
+    previous_right_fit = right_fit
 
-    for i in range(0, len(images)):
-        ax = plt.subplot(gs1[i])
-        plt.imshow(images[i])
-    plt.show()
+    # Choose if diagnostic screen is output or not
+    if diagnostic_screen == True:
+        final = diagnostic([result, non_persp_warp, out_img, persp])
+        return final
+    else:
+        return result
 
-
-test_imgs = glob.glob('test_images/test*.jpg')
-straight_imgs = glob.glob('test_images/straight_lines*.jpg')
-all_imgs = straight_imgs + test_imgs
-
-mod_imgs = []
-
-for img in all_imgs:
-    mod_imgs.append(pipeline(img, video=False))
 
 if __name__ == '__main__':
-     # plt.imshow(mod_imgs[0])
-     # plt.show()
+    # Initial Setup
+    video = 1
+    diagnostic_screen = False
+    frame = 0
+    previous_left_fit = np.array([0, 0, 0])
+    previous_right_fit = np.array([0, 0, 0])
 
-    # show_test_imgs(mod_imgs)
+    # Calibrates camera and get matrix
+    mtx, dist = get_calibration()
 
-    # output_video = 'video_output/new_project_video_output.mp4'
-    # output_clip = VideoFileClip('project_video.mp4')
-    # project_clip = output_clip.fl_image(pipeline)  # NOTE: this function expects color images!!
-    # project_clip.write_videofile(output_video, audio=False)
+    # Load In test images
+    test_imgs = glob.glob('test_images/test*.jpg')
+    straight_imgs = glob.glob('test_images/straight_lines*.jpg')
+    all_imgs = straight_imgs + test_imgs
+    image = mpimg.imread(all_imgs[0])
 
-    challenge_video = 'video_output/new_challenge_video_output.mp4'
-    challenge_clip = VideoFileClip('challenge_video.mp4')
-    project_clip = challenge_clip.fl_image(pipeline)  # NOTE: this function expects color images!!
-    project_clip.write_videofile(challenge_video, audio=False)
+    #get video frame for debugging
+    #
 
-    harder_video = 'video_output/new_harder_video_output.mp4'
-    harder_clip = VideoFileClip('harder_challenge_video.mp4')
-    project_clip = harder_clip.fl_image(pipeline)  # NOTE: this function expects color images!!
-    project_clip.write_videofile(harder_video, audio=False)
+    # Import everything needed to edit/save/watch video clips
+    from moviepy.editor import VideoFileClip
+
+    # If pipeline to be run on image and not video
+    if video == 0:
+        # Perspective transform source and destination points
+        image_x = image.shape[1]
+        image_y = image.shape[0]
+
+        src_bot_left = [int(image_x * 0.15), int(image_y * 0.93)]
+        src_top_left = [int(image_x * 0.40), int(image_y * 0.66)]
+        src_top_right = [int(image_x * 0.55), int(image_y * 0.66)]
+        src_bot_right = [int(image_x * 0.93), int(image_y * 0.93)]
+
+        src = np.float32([src_bot_left,
+                          src_top_left,
+                          src_top_right,
+                          src_bot_right])
+
+        dst_top_right = [int(image_x * 0.01), int(image_y * 0.99)]
+        dst_bot_right = [int(image_x * 0.01), int(image_y * 0.01)]
+        dst_bot_left = [int(image_x * 0.99), int(image_y * 0.01)]
+        dst_top_left = [int(image_x * 0.99), int(image_y * 0.99)]
+
+        dst = np.float32([dst_top_right,
+                          dst_bot_right,
+                          dst_bot_left,
+                          dst_top_left])
+
+        im = lanefinding_pipeline(image)
+        plt.imshow(im)
+        plt.show()
+
+    # Pipeline run on project video
+    if video == 1:
+        # Perspective transform source and destination points
+        image_x = image.shape[1]
+        image_y = image.shape[0]
+
+        src_bot_left = [int(image_x * 0.09), int(image_y * 0.93)]
+        src_top_left = [int(image_x * 0.40), int(image_y * 0.66)]
+        src_top_right = [int(image_x * 0.62), int(image_y * 0.66)]
+        src_bot_right = [int(image_x * 0.99), int(image_y * 0.93)]
+
+        src = np.float32([src_bot_left,
+                          src_top_left,
+                          src_top_right,
+                          src_bot_right])
+
+        # four destination points
+        dst_top_right = [int(image_x * 0.01), int(image_y * 0.99)]
+        dst_bot_right = [int(image_x * 0.01), int(image_y * 0.01)]
+        dst_bot_left = [int(image_x * 0.99), int(image_y * 0.01)]
+        dst_top_left = [int(image_x * 0.99), int(image_y * 0.99)]
+
+        dst = np.float32([dst_top_right,
+                          dst_bot_right,
+                          dst_bot_left,
+                          dst_top_left])
+
+        challenge_video = 'videos/video_output/project_output.mp4'
+        challenge_clip = VideoFileClip('videos/video_input/project_video.mp4')  # .subclip(0, 1)
+        project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
+        project_clip.write_videofile(challenge_video, audio=False)
+
+    # Pipeline run on challenge video
+    if video == 2:
+        # Perspective transform source and destination points
+        image_x = image.shape[1]
+        image_y = image.shape[0]
+
+        src_bot_left = [int(image_x * 0.15), int(image_y * 0.93)]
+        src_top_left = [int(image_x * 0.46), int(image_y * 0.66)]
+        src_top_right = [int(image_x * 0.58), int(image_y * 0.66)]
+        src_bot_right = [int(image_x * 0.93), int(image_y * 0.93)]
+
+        src = np.float32([src_bot_left,
+                          src_top_left,
+                          src_top_right,
+                          src_bot_right])
+
+        # four destination points
+        dst_top_right = [int(image_x * 0.01), int(image_y * 0.99)]
+        dst_bot_right = [int(image_x * 0.01), int(image_y * 0.01)]
+        dst_bot_left = [int(image_x * 0.99), int(image_y * 0.01)]
+        dst_top_left = [int(image_x * 0.99), int(image_y * 0.99)]
+
+        dst = np.float32([dst_top_right,
+                          dst_bot_right,
+                          dst_bot_left,
+                          dst_top_left])
+
+        challenge_video = 'videos/video_output/challenge_output.mp4'
+        challenge_clip = VideoFileClip('videos/video_input/challenge_video.mp4')  # .subclip(0, 5)
+        project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
+        project_clip.write_videofile(challenge_video, audio=False)
+
+    # Pipeline for harder challenge video
+    if video == 3:
+        # Perspective transform source and destination points
+        image_x = image.shape[1]
+        image_y = image.shape[0]
+
+        src_bot_left = [int(image_x * 0.15), int(image_y * 0.93)]
+        src_top_left = [int(image_x * 0.40), int(image_y * 0.66)]
+        src_top_right = [int(image_x * 0.55), int(image_y * 0.66)]
+        src_bot_right = [int(image_x * 0.93), int(image_y * 0.93)]
+
+        src = np.float32([src_bot_left,
+                          src_top_left,
+                          src_top_right,
+                          src_bot_right])
+
+        # four destination points
+        dst_top_right = [int(image_x * 0.01), int(image_y * 0.99)]
+        dst_bot_right = [int(image_x * 0.01), int(image_y * 0.01)]
+        dst_bot_left = [int(image_x * 0.99), int(image_y * 0.01)]
+        dst_top_left = [int(image_x * 0.99), int(image_y * 0.99)]
+
+        dst = np.float32([dst_top_right,
+                          dst_bot_right,
+                          dst_bot_left,
+                          dst_top_left])
+
+        challenge_video = 'videos/video_output/harder_challenge_output.mp4'
+        challenge_clip = VideoFileClip('videos/video_input/harder_challenge_video.mp4').subclip(0, 5)
+        project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
+        project_clip.write_videofile(challenge_video, audio=False)
