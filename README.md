@@ -19,15 +19,14 @@ The goals of this project are the following:
 [//]: # (Image References)
 
 [Undist_vs_Dist]: ./write_up_images/Distorted_vs_Undistorted.PNG "Undistorted"
-[test_undist_vs_dist]: ./write_up_images/testimg_undist_vs_dist.png "Test Undistort"
+[test_undist_vs_dist]: ./write_up_images/testimg_undist_vs_dist.PNG "Test Undistort"
 [final_mask]: ./write_up_images/final_mask.PNG "Binary Example"
 [color_mask]: ./write_up_images/Color_mask.PNG "Color Mask"
 [sobel_mask]: ./write_up_images/sobel_mask.PNG "Sobel Mask"
-[persp_transform]: ./write_up_images/perspective_transform.png "Warp Example"
-[fit_lines]: ./write_up_images/fitlines.png "Fit Visual"
+[persp_transform]: ./write_up_images/perspective_transform.PNG "Warp Example"
+[fit_lines]: ./write_up_images/fitlines.PNG "Fit Visual"
 [curvature_eq]: ./write_up_images/curvature_eq.PNG "Fit Visual"
-[plotted_results]: ./write_up_images/plotted_results.png "Output"
-[video1]: ./video_output/new_project_video_output.mp4 "Video"
+[plotted_results]: ./write_up_images/plotted_results.PNG "Output"
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
 
