@@ -130,6 +130,18 @@ def mask(img):
     binary[(gray_mask > 0)] = 1
     return yellow_mask, white_mask, binary
 
+def abs_sobel_thresh(img, orient='x', sobel_kernel=3, thresh=(0, 255)):
+    # Applying gradient
+    if orient == 'x':
+        abs_sobel = np.absolute(cv2.Sobel(img, cv2.CV_64F, 1, 0))
+    if orient == 'y':
+        abs_sobel = np.absolute(cv2.Sobel(img, cv2.CV_64F, 0, 1))
+    # Rescale back to 8 bit integer
+    scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
+    # Create copy and apply threshold
+    grad_binary = np.zeros_like(scaled_sobel)
+    grad_binary[(scaled_sobel >= thresh[0]) & (scaled_sobel <= thresh[1])] = 1
+    return grad_binary
 
 def final_mask(img):
     # Color masking
@@ -355,26 +367,13 @@ def diagnostic(image_list):
     return diagScreen
 
 
+#Not Used
 def gaussian_blur(img, kernel=5):
     # Apply Gaussian Blur
     blur = cv2.GaussianBlur(img, (kernel, kernel), 0)
     return blur
 
-
-def abs_sobel_thresh(img, orient='x', sobel_kernel=3, thresh=(0, 255)):
-    # Applying gradient
-    if orient == 'x':
-        abs_sobel = np.absolute(cv2.Sobel(img, cv2.CV_64F, 1, 0))
-    if orient == 'y':
-        abs_sobel = np.absolute(cv2.Sobel(img, cv2.CV_64F, 0, 1))
-    # Rescale back to 8 bit integer
-    scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
-    # Create copy and apply threshold
-    grad_binary = np.zeros_like(scaled_sobel)
-    grad_binary[(scaled_sobel >= thresh[0]) & (scaled_sobel <= thresh[1])] = 1
-    return grad_binary
-
-
+#Not Used
 def mag_thresh(image, sobel_kernel=3, mag_thresh=(0, 255)):
     # Take both Sobel x and y gradients
     sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
@@ -388,7 +387,7 @@ def mag_thresh(image, sobel_kernel=3, mag_thresh=(0, 255)):
     mag_binary[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
     return mag_binary
 
-
+#Not Used
 def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi / 2)):
     # Calculate the x and y gradients
     sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=sobel_kernel)

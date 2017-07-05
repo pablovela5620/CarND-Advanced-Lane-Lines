@@ -98,8 +98,8 @@ def lanefinding_pipeline(image):
 
 if __name__ == '__main__':
     # Initial Setup
-    video = 1
-    diagnostic_screen = False
+    video = 0
+    diagnostic_screen = True
     frame = 0
     previous_left_fit = np.array([0, 0, 0])
     previous_right_fit = np.array([0, 0, 0])
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     all_imgs = straight_imgs + test_imgs
     image = mpimg.imread(all_imgs[0])
 
-    #get video frame for debugging
+    # get video frame for debugging
     #
 
     # Import everything needed to edit/save/watch video clips
@@ -125,10 +125,10 @@ if __name__ == '__main__':
         image_x = image.shape[1]
         image_y = image.shape[0]
 
-        src_bot_left = [int(image_x * 0.15), int(image_y * 0.93)]
+        src_bot_left = [int(image_x * 0.09), int(image_y * 0.93)]
         src_top_left = [int(image_x * 0.40), int(image_y * 0.66)]
-        src_top_right = [int(image_x * 0.55), int(image_y * 0.66)]
-        src_bot_right = [int(image_x * 0.93), int(image_y * 0.93)]
+        src_top_right = [int(image_x * 0.62), int(image_y * 0.66)]
+        src_bot_right = [int(image_x * 0.99), int(image_y * 0.93)]
 
         src = np.float32([src_bot_left,
                           src_top_left,
@@ -146,7 +146,9 @@ if __name__ == '__main__':
                           dst_top_left])
 
         im = lanefinding_pipeline(image)
+        plt.figure(figsize=(15, 10))
         plt.imshow(im)
+        plt.axis('off')
         plt.show()
 
     # Pipeline run on project video
@@ -176,7 +178,12 @@ if __name__ == '__main__':
                           dst_bot_left,
                           dst_top_left])
 
-        challenge_video = 'videos/video_output/project_output.mp4'
+        if diagnostic_screen == True:
+            diag_string = '_diagnostic'
+        else:
+            diag_string = ''
+
+        challenge_video = 'videos/video_output/project_output' + diag_string + '.mp4'
         challenge_clip = VideoFileClip('videos/video_input/project_video.mp4')  # .subclip(0, 1)
         project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
         project_clip.write_videofile(challenge_video, audio=False)
@@ -208,7 +215,12 @@ if __name__ == '__main__':
                           dst_bot_left,
                           dst_top_left])
 
-        challenge_video = 'videos/video_output/challenge_output.mp4'
+        if diagnostic_screen == True:
+            diag_string = '_diagnostic'
+        else:
+            diag_string = ''
+
+        challenge_video = 'videos/video_output/challenge_output' + diag_string + '.mp4'
         challenge_clip = VideoFileClip('videos/video_input/challenge_video.mp4')  # .subclip(0, 5)
         project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
         project_clip.write_videofile(challenge_video, audio=False)
@@ -240,7 +252,12 @@ if __name__ == '__main__':
                           dst_bot_left,
                           dst_top_left])
 
-        challenge_video = 'videos/video_output/harder_challenge_output.mp4'
+        if diagnostic_screen == True:
+            diag_string = '_diagnostic'
+        else:
+            diag_string = ''
+
+        challenge_video = 'videos/video_output/harder_challenge_output' + diag_string + '.mp4'
         challenge_clip = VideoFileClip('videos/video_input/harder_challenge_video.mp4').subclip(0, 5)
         project_clip = challenge_clip.fl_image(lanefinding_pipeline)  # NOTE: this function expects color images!!
         project_clip.write_videofile(challenge_video, audio=False)
